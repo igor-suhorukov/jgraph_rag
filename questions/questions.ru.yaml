@@ -1,0 +1,372 @@
+# Questions about the article «Мой PostgreSQL быстрее твоего и почти догнал ClickHouse» (habr.com/ru/articles/1097022).
+# Draft for review: 15 questions of the experiment and 3 pilot questions that never count in the results.
+#
+# answer.kind:
+#   number   one number (value, unit, tolerance)
+#   numbers  several numbers, each the value of a node (id, value, unit)
+#   set      a set of nodes by their ids (local names: the column id of a table, or the IRI minus the article's base)
+#   counts   a number for each node
+#   record   named fields
+#   quote    a quote of the article: verbatim on the given line, and holding must_contain
+#   none     the article does not say: only «no answer» is right
+#
+# format: the shape of the answer the agent is told, a line after the question (Lang.format); by default the kind of
+# the gold answer. A question without an answer has a format of its own, so that the line does not give that away.
+#
+# gold.sql runs with search_path = habr_1097022; gold.sparql runs through kb.sparql_json with kb.union_default_graph = on.
+# Both must give the answer.
+
+base: https://example.org/story-kg/id/habr-1097022/
+
+questions:
+
+  - id: F1
+    type: fact
+    question: Сколько сабмодулей ClickHouse понадобилось, чтобы собрать MergeTree?
+    answer: {kind: number, value: 28, unit: сабмодулей, tolerance: 0}
+    gold:
+      sql: |
+        SELECT value, unit, condition FROM observations WHERE variable ILIKE '%сабмодул%';
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        SELECT ?value ?unit WHERE {
+          ?o a schema:Observation ; schema:variableMeasured ?var ; schema:value ?value ; schema:unitText ?unit .
+          FILTER(CONTAINS(LCASE(?var), "сабмодул"))
+        }
+
+  - id: F2
+    type: fact
+    question: В каком репозитории лежит исходный код iheap?
+    answer: {kind: record, fields: {url: "https://github.com/igor-suhorukov/pg_inplace_update_am"}}
+    gold:
+      sql: |
+        SELECT name, code_repository FROM entities WHERE name ILIKE '%iheap%';
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        SELECT ?name ?repo WHERE {
+          ?s schema:name ?name ; schema:codeRepository ?repo .
+          FILTER(CONTAINS(LCASE(?name), "iheap"))
+        }
+
+  - id: R1
+    type: relation
+    question: Какие СУБД работают в проде у знакомого архитектора автора?
+    answer:
+      kind: set
+      ids: [postgresql, clickhouse, elasticsearch, mongodb]
+      labels: [PostgreSQL, ClickHouse, Elasticsearch, MongoDB]
+    gold:
+      sql: |
+        SELECT e.id, e.name
+        FROM relations r JOIN entities f ON f.id = r.subject JOIN entities e ON e.id = r.object
+        WHERE f.name ILIKE '%архитектор%' AND r.predicate = 'kgo:usesTool';
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        SELECT DISTINCT ?t ?name WHERE {
+          ?f schema:name ?fn ; kgo:usesTool ?t . ?t schema:name ?name .
+          FILTER(CONTAINS(?fn, "архитектор"))
+        }
+
+  - id: R2
+    type: relation
+    question: С какими компонентами интегрируется векторизованный исполнитель pg_vexec?
+    answer:
+      kind: set
+      ids: [ch_table_engines, orca]
+      labels: [ch_table_engines, ORCA]
+    gold:
+      sql: |
+        SELECT CASE WHEN r.subject = 'pg_vexec' THEN r.object ELSE r.subject END AS other, r.label
+        FROM relations r
+        WHERE r.predicate = 'kgo:integratesWith' AND 'pg_vexec' IN (r.subject, r.object);
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        SELECT DISTINCT ?x ?name WHERE {
+          ?v schema:name ?vn ; kgo:integratesWith ?x . ?x schema:name ?name .
+          FILTER(STR(?vn) = "pg_vexec")
+        }
+
+  - id: A1
+    type: aggregate
+    question: Сколько реплик в споре автора со знакомым архитектором произнёс каждый из них?
+    answer:
+      kind: counts
+      counts: {igor_suhorukov: 9, architect_friend: 8}
+      labels:
+        igor_suhorukov: [igor_suhorukov, автор, автор статьи]
+        architect_friend: [Знакомый архитектор автора, знакомый архитектор, архитектор]
+    gold:
+      sql: |
+        SELECT q.speaker, e.name, count(*) AS replicas
+        FROM quotations q JOIN entities e ON e.id = q.speaker
+        GROUP BY q.speaker, e.name ORDER BY replicas DESC;
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        SELECT ?speaker ?name (COUNT(DISTINCT ?q) AS ?replicas) WHERE {
+          ?q a schema:Quotation ; schema:spokenByCharacter ?speaker . ?speaker schema:name ?name .
+        }
+        GROUP BY ?speaker ?name ORDER BY DESC(?replicas)
+
+  - id: A2
+    type: aggregate
+    question: В каком разделе статьи больше всего наборов измерений и сколько их там?
+    answer:
+      kind: counts
+      counts: {s2: 9}
+      labels: {s2: Как уменьшал среднее время запроса от 715 до 49 миллисекунд}
+    gold:
+      sql: |
+        SELECT s.id, s.name, count(*) AS datasets
+        FROM datasets d JOIN sections s ON s.id = d.section
+        GROUP BY s.id, s.name ORDER BY datasets DESC LIMIT 1;
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        PREFIX qb: <http://purl.org/linked-data/cube#>
+        SELECT ?sec ?name (COUNT(DISTINCT ?ds) AS ?datasets) WHERE {
+          ?ds a qb:DataSet ; kgo:contextSection ?sec . ?sec schema:name ?name .
+        }
+        GROUP BY ?sec ?name ORDER BY DESC(?datasets) LIMIT 1
+
+  - id: P1
+    type: path
+    question: Какие числовые результаты статьи относятся к разработкам, которые реализуют табличный метод доступа PostgreSQL?
+    answer:
+      kind: numbers
+      values:
+        - {id: obs_final_pg, value: 49.9, unit: мс}
+        - {id: obs_ratio_ext, value: 3, unit: раза}
+    gold:
+      sql: |
+        SELECT o.id, o.variable, o.value, o.unit, o.condition
+        FROM relations r
+        JOIN concepts c ON c.id = r.object
+        JOIN observations o ON r.subject = ANY (o.about)
+        WHERE r.predicate = 'kgo:implements' AND c.name ILIKE '%табличный метод доступа%';
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        SELECT DISTINCT ?o ?var ?value ?unit WHERE {
+          ?m schema:name ?mn . FILTER(CONTAINS(LCASE(?mn), "табличный метод доступа"))
+          ?x kgo:implements ?m .
+          ?o schema:observationAbout ?x ; schema:variableMeasured ?var ; schema:value ?value .
+          OPTIONAL { ?o schema:unitText ?unit }
+        }
+
+  - id: P2
+    type: path
+    question: Какие утверждения прямо или через цепочку доводов подкрепляют тезис о том, что векторизации нужен источник данных, отдающий колонки? Сам тезис в ответ не включай.
+    answer:
+      kind: set
+      ids: [claim_no_columnar_source, claim_skip_simulation, claim_citus_hydra_rows, claim_pax_aoco_patched]
+    gold:
+      sql: |
+        WITH RECURSIVE support(id) AS (
+          SELECT c.id FROM claims c, claims t
+          WHERE t.text ILIKE '%источник данных, отдающий колонки%' AND t.id = ANY (c.supports)
+          UNION
+          SELECT c.id FROM claims c JOIN support s ON s.id = ANY (c.supports)
+        )
+        SELECT s.id, c.text FROM support s JOIN claims c USING (id);
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        SELECT DISTINCT ?c ?text WHERE {
+          ?t schema:text ?tt . FILTER(CONTAINS(?tt, "источник данных, отдающий колонки"))
+          ?c kgo:supports+ ?t ; schema:text ?text .
+        }
+
+  - id: D1
+    type: dispute
+    question: На какую реплику архитектора автор ответил с иронией, и что архитектор в ней советовал?
+    answer:
+      kind: record
+      fields: {id: rep10}
+      labels: {rep10: [возьми колоночное хранилище]}
+      text: Так возьми колоночное хранилище. Их для PostgreSQL с десяток.
+    gold:
+      sql: |
+        SELECT t.id, t.text FROM quotations q JOIN quotations t ON t.id = q.stance_target WHERE q.stance = 'irony';
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        SELECT DISTINCT ?t ?text WHERE {
+          ?q kgo:stance <https://example.org/story-kg/concept/stance/irony> ; kgo:stanceTarget ?t .
+          ?t schema:text ?text .
+        }
+
+  - id: D2
+    type: dispute
+    question: Какое утверждение в статье оспорено, каким утверждением, и опровергнуто ли оно?
+    answer:
+      kind: record
+      fields: {attacked: claim_reliable_or_fast, attacker: claim_final_result, rebutted: false}
+      labels:
+        claim_reliable_or_fast: [надёжность и скорость несовместимы, либо надежно, либо быстро]
+        claim_final_result: [в несколько раз медленнее clickhouse, в 3 раза медленнее]
+      verdict: disputed
+    gold:
+      sql: |
+        SELECT k.attacked, a.text AS attacked_text, k.attacker, b.text AS attacker_text, k.rebutted, k.verdict
+        FROM conflicts k JOIN claims a ON a.id = k.attacked JOIN claims b ON b.id = k.attacker;
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        SELECT DISTINCT ?attacked ?attacker ?rebutted ?verdict WHERE {
+          ?k a kgo:Conflict ; kgo:conflictedClaim ?attacked ; kgo:conflictingClaim ?attacker ; kgo:attackRebutted ?rebutted .
+          OPTIONAL { ?r kgo:reviewingClaim ?attacker ; schema:itemReviewed ?attacked ; kgo:verdict ?verdict }
+        }
+
+  - id: D3
+    type: dispute
+    question: Сколько диалогов спора автора со знакомым архитектором закончил своей репликой каждый из участников?
+    answer:
+      kind: counts
+      counts: {igor_suhorukov: 5}
+      labels:
+        igor_suhorukov: [igor_suhorukov, автор, автор статьи]
+        architect_friend: [Знакомый архитектор автора, знакомый архитектор, архитектор]
+      last_replicas: [rep05, rep11, rep13, rep15, rep17]
+    gold:
+      sql: |
+        SELECT speaker, count(*) AS dialogues
+        FROM (SELECT DISTINCT ON (dialogue) dialogue, speaker
+              FROM quotations WHERE dialogue IS NOT NULL
+              ORDER BY dialogue, turn_index DESC) AS last_turn
+        GROUP BY speaker;
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        SELECT ?speaker (COUNT(DISTINCT ?d) AS ?dialogues) WHERE {
+          { SELECT ?d (MAX(?i) AS ?last) WHERE { ?q kgo:inDialogue ?d ; kgo:turnIndex ?i } GROUP BY ?d }
+          ?r kgo:inDialogue ?d ; kgo:turnIndex ?last ; schema:spokenByCharacter ?speaker .
+        }
+        GROUP BY ?speaker
+
+  - id: C1
+    type: citation
+    question: Где в статье знакомый архитектор говорит, что надёжность и скорость несовместимы? Дай дословную цитату и номер строки.
+    answer: {kind: quote, line: 44, must_contain: "Либо надежно, либо быстро"}
+    gold:
+      sql: |
+        SELECT e.about, e.line, e.quote
+        FROM evidence e JOIN quotations q ON q.id = e.about
+        WHERE q.text ILIKE '%надежно%быстро%';
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        PREFIX oa: <http://www.w3.org/ns/oa#>
+        SELECT DISTINCT ?q ?line ?exact WHERE {
+          ?q a schema:Quotation ; schema:text ?text . FILTER(CONTAINS(?text, "надежно"))
+          ?a oa:hasBody ?q ; oa:hasTarget ?t . ?t kgo:line ?line ; oa:hasSelector ?s . ?s oa:exact ?exact .
+        }
+
+  - id: C2
+    type: citation
+    question: Приведи дословную цитату, где автор называет долю ядер функций во времени исполнения запроса, и номер строки.
+    answer: {kind: quote, line: 62, must_contain: "0-2%"}
+    gold:
+      sql: |
+        SELECT o.id, e.line, e.quote
+        FROM evidence e JOIN observations o ON o.id = e.about
+        WHERE o.variable ILIKE '%ядер функций%';
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        PREFIX oa: <http://www.w3.org/ns/oa#>
+        SELECT DISTINCT ?o ?line ?exact WHERE {
+          ?o schema:variableMeasured ?v . FILTER(CONTAINS(?v, "ядер функций"))
+          ?a oa:hasBody ?o ; oa:hasTarget ?t . ?t kgo:line ?line ; oa:hasSelector ?s . ?s oa:exact ?exact .
+        }
+
+  - id: U1
+    type: no_answer
+    question: Какой процессор у ноутбука, на котором автор сравнивал PostgreSQL и ClickHouse?
+    format: record
+    answer: {kind: none}
+    gold:
+      sql: |
+        SELECT 'evidence' AS src, quote AS text FROM evidence WHERE quote ~* '(процессор|cpu|ryzen|intel|amd|apple m)'
+        UNION ALL
+        SELECT 'observations', condition FROM observations WHERE condition ~* '(процессор|cpu|ryzen|intel|amd|apple m)'
+        UNION ALL
+        SELECT 'entities', description FROM entities WHERE description ~* '(процессор|cpu|ryzen|intel|amd|apple m)';
+      sparql: |
+        SELECT ?s ?p ?o WHERE {
+          ?s ?p ?o . FILTER(isLiteral(?o) && REGEX(STR(?o), "процессор|cpu|ryzen|intel|amd|apple m", "i"))
+        }
+
+  - id: U2
+    type: no_answer
+    question: Под какой лицензией распространяется pg_vexec?
+    format: record
+    answer: {kind: none}
+    gold:
+      sql: |
+        SELECT 'evidence' AS src, quote AS text FROM evidence WHERE quote ~* '(лиценз|licen)'
+        UNION ALL
+        SELECT 'entities', description FROM entities WHERE description ~* '(лиценз|licen)';
+      sparql: |
+        SELECT ?s ?p ?o WHERE {
+          { ?s ?p ?o . FILTER(isLiteral(?o) && REGEX(STR(?o), "лиценз|licen", "i")) }
+          UNION
+          { ?s <http://schema.org/license> ?o }
+        }
+
+pilot:
+
+  - id: X1
+    type: fact
+    question: Какую долю тактов в запросе Q28 съедала функция miss() штатного движка регулярных выражений?
+    answer: {kind: number, value: 36, unit: "%", tolerance: 0}
+    gold:
+      sql: |
+        SELECT value, unit, condition FROM observations WHERE variable ILIKE '%miss()%';
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        SELECT ?value ?unit WHERE {
+          ?o schema:variableMeasured ?var ; schema:value ?value ; schema:unitText ?unit .
+          FILTER(CONTAINS(?var, "miss()"))
+        }
+
+  - id: X2
+    type: path
+    question: Какой шаг процесса выполняет скан с дочитыванием колонок, если после первого условия в батче не осталось строк?
+    answer:
+      kind: set
+      ids: [proc_lazy_scan.t4]
+      labels: [Не читать остальные колонки батча]
+    gold:
+      sql: |
+        SELECT f.process || '.' || f.target AS step, t.name
+        FROM process_flows f
+        JOIN processes p ON p.id = f.process
+        JOIN process_steps t ON t.process = f.process AND t.step = f.target
+        WHERE p.name ILIKE '%дочитыванием колонок%' AND f.condition = 'не остались';
+      sparql: |
+        PREFIX schema: <http://schema.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        PREFIX bbo: <https://www.irit.fr/recherches/MELODI/ontologies/BBO#>
+        SELECT DISTINCT ?t ?name WHERE {
+          ?p bbo:name ?pn . FILTER(CONTAINS(?pn, "дочитыванием колонок"))
+          ?f bbo:has_container ?p ; bbo:has_conditionExpression/rdfs:label ?cond ; bbo:has_targetRef ?t .
+          FILTER(STR(?cond) = "не остались")
+          ?t schema:name ?name .
+        }
+
+  - id: X3
+    type: citation
+    question: Приведи дословную цитату, где автор объясняет, почему нельзя взять готовый StorageMergeTree, и номер строки.
+    answer: {kind: quote, line: 107, must_contain: "StorageMergeTree"}
+    gold:
+      sql: |
+        SELECT e.about, e.line, e.quote FROM evidence e WHERE e.quote ILIKE '%StorageMergeTree%';
+      sparql: |
+        PREFIX kgo: <https://example.org/story-kg/ontology#>
+        PREFIX oa: <http://www.w3.org/ns/oa#>
+        SELECT DISTINCT ?b ?line ?exact WHERE {
+          ?a oa:hasBody ?b ; oa:hasTarget ?t . ?t kgo:line ?line ; oa:hasSelector ?s . ?s oa:exact ?exact .
+          FILTER(CONTAINS(?exact, "StorageMergeTree"))
+        }

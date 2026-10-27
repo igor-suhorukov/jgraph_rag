@@ -1,0 +1,6 @@
+# secrets: the OpenRouter key lives in .env and never in the tree
+.env
+# Maven's output
+target/
+# an IDE's settings
+/.idea/
