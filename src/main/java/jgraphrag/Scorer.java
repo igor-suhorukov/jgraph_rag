@@ -64,6 +64,7 @@ final class Scorer {
         if (t.startsWith(MemoryServer.BASE)) {
             t = t.substring(MemoryServer.BASE.length());
         }
+        t = withoutTrailingSlashes(t);
         int slash = t.lastIndexOf('/');
         return (slash >= 0 && slash < t.length() - 1 ? t.substring(slash + 1) : t).toLowerCase(Locale.ROOT);
     }

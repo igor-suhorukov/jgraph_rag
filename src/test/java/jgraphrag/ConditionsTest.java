@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,6 +36,27 @@ class ConditionsTest {
         }
         assertEquals(List.of("sql", "sparql"), List.of(Bench.CONDITION_TOOLS.get("both").split(",")));
         assertEquals(List.of("sparql", "sql"), List.of(Bench.CONDITION_TOOLS.get("both_sparql_first").split(",")));
+    }
+
+    @Test
+    void theCorpusConditionsDifferInTheirToolsAlone() throws Exception {
+        String sql = Bench.system("corpus_sql", Lang.RU);
+        String vector = Bench.system("vector", Lang.RU);
+        String both = Bench.system("vector_sql", Lang.RU);
+        String memory = Bench.resource("ru/corpus.md").strip();
+        for (String s : List.of(sql, vector, both)) {
+            assertTrue(s.contains(memory), "the same description of the corpus");
+            assertFalse(s.contains("{{"), s);
+        }
+        assertTrue(sql.contains("sql_query") && !sql.contains("semantic_search"));
+        assertTrue(vector.contains("semantic_search") && !vector.contains("sql_query"));
+        assertTrue(both.indexOf("Инструмент semantic_search") < both.indexOf("Инструмент sql_query"));
+        assertEquals("corpus", Bench.CONDITION_TOOLS.get("corpus_sql"));
+        assertEquals(List.of("semantic", "corpus"), List.of(Bench.CONDITION_TOOLS.get("vector_sql").split(",")));
+        assertTrue(Bench.isCorpus("vector") && !Bench.isCorpus("both"));
+        assertEquals(List.of("corpus_sql", "vector", "vector_sql"), Bench.Settings.of(Map.of("set", "corpus")).conditions());
+        Map<String, String> english = Map.of("set", "corpus", "lang", "en");
+        assertThrows(IllegalArgumentException.class, () -> Bench.Settings.of(english));
     }
 
     @Test

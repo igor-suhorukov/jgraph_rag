@@ -35,6 +35,20 @@ class QuestionsTest {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    @Test
+    void everyQuestionAboutTheCorpusComesWithItsFormat() throws Exception {
+        Map<String, Object> doc = new ObjectMapper(new YAMLFactory()).readValue(Path.of("questions/corpus.ru.yaml").toFile(), Map.class);
+        List<Map<String, Object>> questions = (List<Map<String, Object>>) doc.get("questions");
+        for (Map<String, Object> q : questions) {
+            String asked = Bench.ask(q, Lang.RU);
+            assertEquals(Lang.RU.format((String) q.get("format")), asked.substring(asked.lastIndexOf("\n\n") + 2), (String) q.get("id"));
+            Map<String, Object> gold = (Map<String, Object>) q.get("gold");
+            assertTrue(gold.get("sql") instanceof String, q.get("id") + " has a gold SQL query");
+        }
+        assertEquals(12, questions.size());
+    }
+
     @Test
     void aQuestionWithoutAnAnswerMustNotSayItsKind() {
         Map<String, Object> q = Map.of("id", "U9", "question", "?", "answer", Map.of("kind", "none"));

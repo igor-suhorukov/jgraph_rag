@@ -1,0 +1,160 @@
+# Questions about the corpus of articles (the database habr, schema corpus: db/corpus.sql), the memory of the classic
+# RAG: 13,275 articles of Habr with what an LLM said of each, and the EmbeddingGemma vectors of those texts. The answers
+# are articles (their habr_id), counts and values of the articles' fields.
+#
+# answer.kind as in questions.ru.yaml: set (articles by habr_id, or values of a field), number, counts, none.
+# format: the shape of the answer the agent is told (Lang.format): articles, tally, tallies, codes.
+#
+# gold.sql runs as agent_sql with search_path = corpus, public, and must give the answer.
+# gold.search is what semantic_search is asked for (query, and where if any): the articles of the answer, or the
+# article the answer is a field of (article), must be among the habr_id of its first `within` rows. A question with no
+# article to find has no gold.search.
+
+questions:
+
+  - id: M1
+    type: meaning
+    question: В какой статье автор построил тележку на педальном ходу, чтобы проехать на ней по старой железной дороге вдоль Байкала?
+    format: articles
+    answer:
+      kind: set
+      ids: [752284]
+      labels: [Как я построил велодрезину]
+    gold:
+      sql: |
+        SELECT habr_id, title FROM indexed_text WHERE summary ILIKE '%велодрезин%';
+      search: {query: самодельная тележка с педалями для поездки по рельсам вдоль Байкала, within: 3}
+
+  - id: M2
+    type: meaning
+    question: Какие новости рассказывали о том, что чат-бот Google ошибся в факте в своём первом рекламном ролике?
+    format: articles
+    answer:
+      kind: set
+      ids: [715700, 715830]
+      labels:
+        - Астрономы рассказали, что чат-бот Bard от Google допустил фактическую ошибку в первой демонстрации своего использования
+        - Чат-бот Bard ошибся в рекламном ролике на своей презентации, из-за чего акции Alphabet упали на 8,9%
+    gold:
+      sql: |
+        SELECT habr_id, title FROM indexed_text
+        WHERE post_type = 'news' AND summary ILIKE '%bard%' AND summary ~* 'фактическ\w* ошибк';
+      search: {query: чат-бот Google допустил фактическую ошибку в рекламной демонстрации, where: "post_type = 'news'", within: 6}
+
+  - id: M3
+    type: meaning_filter
+    question: Какие новости с негативной тональностью сообщали, что зарубежный хостинг-провайдер прекращает обслуживать клиентов из России?
+    format: articles
+    answer:
+      kind: set
+      ids: [779360, 779928]
+      labels:
+        - Hetzner прекращает обслуживание российских клиентов на фоне геополитических напряженностей
+        - Godaddy вслед за Hetzner отказывается от обслуживания клиентов из РФ
+    gold:
+      sql: |
+        SELECT habr_id, title FROM indexed_text
+        WHERE post_type = 'news' AND polarity = 'negative' AND title ~* 'hetzner|godaddy';
+      search: {query: хостинг-провайдер прекращает обслуживание клиентов из России, where: "post_type = 'news' AND polarity = 'negative'", within: 6}
+
+  - id: M4
+    type: meaning_filter
+    question: Какие художественные рассказы (основной жанр fiction) переносят героев сказки про Винни-Пуха в разработку на 1С?
+    format: articles
+    answer:
+      kind: set
+      ids: [762780, 773132]
+      labels:
+        - Как Винни Пух и Пятачок стали программистами 1С (День первый. Архитектура)
+        - Как Винни Пух и Пятачок стали программистами 1С (День второй. Презентация)
+    gold:
+      sql: |
+        SELECT habr_id, title FROM indexed_text WHERE primary_genre = 'fiction' AND summary ILIKE '%винни%';
+      search: {query: сказочные персонажи становятся программистами 1С, where: "primary_genre = 'fiction'", within: 6}
+
+  - id: M5
+    type: meaning_filter
+    question: Какая статья с пометкой NSFW рассказывает о программе-пауке, которая собирает откровенные фотографии с платформы Telegraph?
+    format: articles
+    answer:
+      kind: set
+      ids: [725888]
+      labels: ["NudeCrawler: Голый ползун по женщинам на телеграфе"]
+    gold:
+      sql: |
+        SELECT habr_id, title FROM indexed_text WHERE nsfw AND summary ILIKE '%telegra.ph%';
+      search: {query: программа-паук для поиска откровенных фотографий на Telegraph, where: nsfw, within: 3}
+
+  - id: S1
+    type: structure
+    question: Сколько статей коллекции относятся к основному жанру fiction?
+    format: tally
+    answer: {kind: number, value: 23, tolerance: 0}
+    gold:
+      sql: |
+        SELECT count(*) FROM indexed_text WHERE primary_genre = 'fiction';
+
+  - id: S2
+    type: structure
+    question: У какой статьи коллекции больше всего просмотров?
+    format: articles
+    answer:
+      kind: set
+      ids: [704600]
+      labels: [Как получить доступ к chatGPT в России]
+    gold:
+      sql: |
+        SELECT habr_id, title, reading_count FROM indexed_text ORDER BY reading_count DESC LIMIT 1;
+
+  - id: S3
+    type: structure
+    question: Сколько в коллекции новостей (тип публикации news) с каждой тональностью?
+    format: tallies
+    answer:
+      kind: counts
+      counts: {positive: 100, neutral: 82, negative: 50, mixed: 38}
+    gold:
+      sql: |
+        SELECT polarity, count(*) FROM indexed_text WHERE post_type = 'news' GROUP BY polarity ORDER BY 2 DESC;
+
+  - id: H1
+    type: meaning_field
+    question: Сколько просмотров набрала статья о том, как профессор Гарварда стал ведущим охотником за пришельцами?
+    format: tally
+    answer: {kind: number, value: 5623, tolerance: 0}
+    gold:
+      sql: |
+        SELECT reading_count FROM indexed_text WHERE title ILIKE '%стал ведущим охотником за пришельцами%';
+      search: {query: профессор Гарварда стал ведущим охотником за пришельцами, article: 757486, within: 3}
+
+  - id: H2
+    type: meaning_field
+    question: Какие демагогические приёмы LLM нашла в статье, автор которой пишет о своей ненависти к электросамокатам?
+    format: codes
+    answer:
+      kind: set
+      ids: [appeal_to_emotion, false_dilemma, hyperbole_bombast, us_versus_them_binary, simplification_to_slogans]
+    gold:
+      sql: |
+        SELECT unnest(demagoguery_techniques) FROM indexed_text WHERE title ILIKE '%ненависти к самокатам%';
+      search: {query: автор ненавидит электросамокаты, article: 746604, within: 3}
+
+  - id: N1
+    type: no_answer
+    question: В какой статье коллекции движок таблиц MergeTree из ClickHouse встроили в PostgreSQL как табличный метод доступа?
+    format: articles
+    answer: {kind: none}
+    gold:
+      sql: |
+        SELECT habr_id, title FROM indexed_text
+        WHERE (summary || ' ' || meaning) ILIKE '%mergetree%' AND (summary || ' ' || meaning) ILIKE '%postgres%';
+
+  - id: N2
+    type: no_answer
+    question: В какой статье коллекции рассказывается о выходе PostgreSQL 19?
+    format: articles
+    answer: {kind: none}
+    gold:
+      sql: |
+        SELECT habr_id, title FROM indexed_text
+        WHERE concat_ws(' ', title, llm_title, summary, meaning, array_to_string(keywords, ' ')) ~* 'postgre(sql|s)? ?19';

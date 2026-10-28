@@ -37,6 +37,51 @@ enum Lang {
                 + "sees all the graphs at once. Read-only, at most 5 seconds; the first 200 rows come back.";
     }
 
+    String corpusSqlDescription() {
+        return this == RU
+                ? "SQL-запрос (PostgreSQL 19) к таблицам коллекции статей Хабра. Схема corpus уже стоит в search_path. "
+                + "Только чтение, не дольше 5 секунд; возвращаются первые 200 строк."
+                : "An SQL query (PostgreSQL 19) to the tables of the collection of Habr articles. Schema corpus is already on "
+                + "the search_path. Read-only, at most 5 seconds; the first 200 rows come back.";
+    }
+
+    String semanticDescription() {
+        return this == RU
+                ? "Поиск по смыслу в коллекции статей Хабра: k текстов статей из таблицы text_embeddings, ближайших по "
+                + "смыслу к query, с косинусным расстоянием distance (0 — тот же смысл; чем больше, тем дальше). Условие "
+                + "where над колонками text_embeddings сужает поиск. Только чтение, не дольше 5 секунд."
+                : "A search by meaning in the collection of Habr articles: the k texts of articles from the table "
+                + "text_embeddings nearest in meaning to query, with the cosine distance distance (0: the same meaning; the "
+                + "larger, the farther). A condition where over the columns of text_embeddings narrows the search. "
+                + "Read-only, at most 5 seconds.";
+    }
+
+    String searchQuery() {
+        return this == RU ? "Что искать: текст, близкие по смыслу к которому тексты статей нужны"
+                : "What to look for: the text whose neighbours in meaning among the texts of the articles are wanted";
+    }
+
+    String searchWhere() {
+        return this == RU
+                ? "Необязательное условие SQL над колонками text_embeddings, без слова WHERE, например "
+                + "primary_genre = 'opinion' AND published >= '2023-06-01'"
+                : "An optional SQL condition over the columns of text_embeddings, without the word WHERE, for example "
+                + "primary_genre = 'opinion' AND published >= '2023-06-01'";
+    }
+
+    String searchK(int byDefault, int max) {
+        return this == RU ? "Сколько текстов вернуть: от 1 до " + max + ", по умолчанию " + byDefault
+                : "How many texts to return: 1 to " + max + ", " + byDefault + " by default";
+    }
+
+    String badWhere() {
+        return this == RU ? "аргумент where — строка с условием SQL" : "the argument where is a string with an SQL condition";
+    }
+
+    String badK(int max) {
+        return this == RU ? "аргумент k — целое число от 1 до " + max : "the argument k is an integer from 1 to " + max;
+    }
+
     String queryArgument() {
         return this == RU ? "Текст запроса" : "The text of the query";
     }
@@ -118,6 +163,18 @@ enum Lang {
             case "quote" -> this == RU
                     ? "Формат ответа: в evidence — дословная цитата статьи и номер её строки."
                     : "Answer format: in evidence the verbatim quote of the article and its line number.";
+            case "articles" -> this == RU
+                    ? "Формат ответа: в values — по элементу на статью, которая и есть ответ: key — habr_id статьи, value — её заголовок."
+                    : "Answer format: an element in values for every article that is the answer: key is the article's habr_id, value its title.";
+            case "tally" -> this == RU
+                    ? "Формат ответа: в values — один элемент: key — что посчитано, value — только число."
+                    : "Answer format: one element in values: key is what was counted, value only the number.";
+            case "codes" -> this == RU
+                    ? "Формат ответа: в values — по элементу на каждое значение, которое и есть ответ: key — значение так, как оно записано в памяти."
+                    : "Answer format: an element in values for every value that is the answer: key is the value as the memory writes it.";
+            case "tallies" -> this == RU
+                    ? "Формат ответа: в values — по элементу на каждое посчитанное значение: key — значение, value — только число."
+                    : "Answer format: an element in values for every value counted: key is the value, value only the number.";
             default -> throw new IllegalArgumentException("no answer format for " + kind);
         };
     }
@@ -170,6 +227,13 @@ enum Lang {
             case "both_sparql_first" -> this == RU
                     ? "двумя инструментами: sparql_query — SPARQL-запросами к графу и sql_query — SQL-запросами к таблицам тех же знаний"
                     : "with two tools: sparql_query, SPARQL queries to the graph, and sql_query, SQL queries to the tables of the same knowledge";
+            case "corpus_sql" -> this == RU ? "инструментом sql_query — SQL-запросами к таблицам коллекции"
+                    : "with the tool sql_query: SQL queries to the tables of the collection";
+            case "vector" -> this == RU ? "инструментом semantic_search — поиском текстов статей по смыслу"
+                    : "with the tool semantic_search: a search of the texts of the articles by meaning";
+            case "vector_sql" -> this == RU
+                    ? "двумя инструментами: semantic_search — поиском текстов статей по смыслу и sql_query — SQL-запросами к таблицам коллекции"
+                    : "with two tools: semantic_search, a search of the texts of the articles by meaning, and sql_query, SQL queries to the tables of the collection";
             default -> throw new IllegalArgumentException("condition " + condition);
         };
     }

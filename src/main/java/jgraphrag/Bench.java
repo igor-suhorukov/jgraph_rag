@@ -44,9 +44,14 @@ public final class Bench {
     static final String SPARQL = "sparql";
     static final String BOTH = "both";
     static final String BOTH_SPARQL_FIRST = "both_sparql_first";
+    static final String CORPUS_SQL = "corpus_sql";
+    static final String VECTOR = "vector";
+    static final String VECTOR_SQL = "vector_sql";
+    static final String CORPUS = "corpus";
 
     private static final String ANSWER = "answer";
     private static final String QUESTION = "question";
+    private static final String QUESTIONS = "questions";
     private static final String MODEL = "model";
     private static final String CONDITION = "condition";
     private static final String REPEAT = "repeat";
@@ -60,7 +65,7 @@ public final class Bench {
             new Model("qwen", "qwen/qwen3.8-27b", List.of("deepinfra/bf16", "cerebras/fp16")));
 
     static final Map<String, String> CONDITION_TOOLS = Map.of(SQL, SQL, SPARQL, SPARQL, BOTH, "sql,sparql",
-            BOTH_SPARQL_FIRST, "sparql,sql");
+            BOTH_SPARQL_FIRST, "sparql,sql", CORPUS_SQL, CORPUS, VECTOR, "semantic", VECTOR_SQL, "semantic,corpus");
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -78,14 +83,19 @@ public final class Bench {
                 models.add(MODELS.stream().filter(m -> m.key().equals(k)).findFirst()
                         .orElseThrow(() -> new IllegalArgumentException("model " + k)));
             }
+            boolean corpus = CORPUS.equals(set);
+            if (corpus && lang != Lang.RU) {
+                throw new IllegalArgumentException("the corpus is Russian: --set corpus runs with --lang ru");
+            }
             return new Settings(lang, set,
-                    List.of(opt.getOrDefault("conditions", "sql,sparql,both").split(",")),
+                    List.of(opt.getOrDefault("conditions", corpus ? "corpus_sql,vector,vector_sql" : "sql,sparql,both").split(",")),
                     Integer.parseInt(opt.getOrDefault("repeats", "3")),
                     Integer.parseInt(opt.getOrDefault("workers", "8")),
                     opt.containsKey("only") ? Set.of(opt.get("only").split(",")) : Set.of(),
                     Path.of(opt.getOrDefault("out", "results/" + set + "." + lang.code() + ".jsonl")),
                     models,
-                    Path.of(opt.getOrDefault("questions", "questions/questions." + lang.code() + ".yaml")),
+                    Path.of(opt.getOrDefault(QUESTIONS, QUESTIONS + "/" + (corpus ? CORPUS : QUESTIONS) + "." + lang.code()
+                            + ".yaml")),
                     Path.of(opt.getOrDefault("article", "data/1097022.md")),
                     opt.containsKey("dry-run"));
         }
@@ -133,7 +143,7 @@ public final class Bench {
     static List<Map<String, Object>> questions(Settings s) throws IOException {
         Map<String, Object> doc = new ObjectMapper(new YAMLFactory()).readValue(s.questions().toFile(), Map.class);
         List<Map<String, Object>> questions =
-                new ArrayList<>((List<Map<String, Object>>) doc.get("pilot".equals(s.set()) ? "pilot" : "questions"));
+                new ArrayList<>((List<Map<String, Object>>) doc.get("pilot".equals(s.set()) ? "pilot" : QUESTIONS));
         if (!s.only().isEmpty()) {
             questions.removeIf(q -> !s.only().contains(q.get("id")));
         }
@@ -290,18 +300,28 @@ public final class Bench {
         return q.get(QUESTION) + "\n\n" + lang.format(kind);
     }
 
+    static boolean isCorpus(String condition) {
+        return Set.of(CORPUS_SQL, VECTOR, VECTOR_SQL).contains(condition);
+    }
+
     static DefaultMcpClient memory(String condition, Lang lang) {
-        return memory(condition, lang, System.getProperty("java.class.path"),
-                System.getenv().getOrDefault("JGRAPH_JDBC", "jdbc:postgresql://127.0.0.1:5432/kb_{lang}")
-                        .replace("{lang}", lang.code()));
+        String jdbc = isCorpus(condition)
+                ? System.getenv().getOrDefault("JGRAPH_CORPUS_JDBC", "jdbc:postgresql://127.0.0.1:5432/habr")
+                : System.getenv().getOrDefault("JGRAPH_JDBC", "jdbc:postgresql://127.0.0.1:5432/kb_{lang}");
+        return memory(condition, lang, System.getProperty("java.class.path"), jdbc.replace("{lang}", lang.code()),
+                System.getenv().getOrDefault("JGRAPH_OLLAMA", "http://127.0.0.1:11434"));
     }
 
     static DefaultMcpClient memory(String condition, Lang lang, String classpath, String jdbcUrl) {
+        return memory(condition, lang, classpath, jdbcUrl, "http://127.0.0.1:11434");
+    }
+
+    static DefaultMcpClient memory(String condition, Lang lang, String classpath, String jdbcUrl, String ollama) {
         String java = ProcessHandle.current().info().command().orElse("java");
         StdioMcpTransport transport = new StdioMcpTransport.Builder()
                 .command(List.of(java, "-Xmx256m", "-XX:+UseSerialGC", "-cp", classpath, "jgraphrag.MemoryServer",
                         CONDITION_TOOLS.get(condition), lang.code()))
-                .environment(Map.of("JGRAPH_JDBC", jdbcUrl))
+                .environment(Map.of("JGRAPH_JDBC", jdbcUrl, "JGRAPH_OLLAMA", ollama))
                 .logEvents(false)
                 .build();
         return new DefaultMcpClient.Builder()
@@ -313,6 +333,18 @@ public final class Bench {
 
     static String system(String condition, Lang lang) throws IOException {
         String dir = lang.code() + "/";
+        if (isCorpus(condition)) {
+            String sql = resource(dir + "howto_corpus_sql.md");
+            String vector = resource(dir + "howto_vector.md");
+            String howto = switch (condition) {
+                case CORPUS_SQL -> sql;
+                case VECTOR -> vector;
+                case VECTOR_SQL -> vector.strip() + "\n\n" + sql;
+                default -> throw new IllegalArgumentException("condition " + condition);
+            };
+            return resource(dir + "corpus_system.md").replace("{{tools}}", lang.tools(condition))
+                    .replace("{{howto}}", howto.strip()).replace("{{memory}}", resource(dir + "corpus.md").strip());
+        }
         String sql = resource(dir + "howto_sql.md").replace("{{inventory}}", resource("inventory_sql.md").strip());
         String sparql = resource(dir + "howto_sparql.md").replace("{{inventory}}", resource("inventory_sparql.md").strip());
         String howto = switch (condition) {

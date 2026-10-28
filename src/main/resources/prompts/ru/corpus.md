@@ -1,0 +1,70 @@
+### indexed_text
+Статьи Хабра, по строке на статью: 13 275 статей, почти все опубликованы с декабря 2022 по январь 2024 года, без корпоративных блогов. Счётчики Хабра и то, что LLM извлекла из текста статьи: краткое содержание, смысл, жанр, темы, выводы, тональность, демагогия, реклама. Самого текста статей здесь нет. Тексты, по которым ищут по смыслу, и их векторы — в text_embeddings
+- task_id bigint — Номер статьи в коллекции, от 1 до 13275
+- habr_id integer — Номер статьи на Хабре; адрес статьи https://habr.com/ru/articles/{habr_id}/
+- url text — Адрес статьи
+- title text — Заголовок статьи на Хабре
+- llm_title text — Заголовок, который дала статье LLM
+- author text — Ник автора на Хабре
+- published timestamp without time zone — Время публикации
+- post_type text — Тип публикации: article, news, megaproject
+- hubs text[] — Хабы статьи
+- tags text[] — Теги, которые поставил автор
+- score integer — Рейтинг статьи: плюсы минус минусы
+- votes_plus integer — Плюсы
+- votes_minus integer — Минусы
+- votes_count integer — Голоса
+- reading_count integer — Просмотры
+- comments_count integer — Комментарии
+- favorites_count integer — Добавления в закладки
+- author_score integer — Карма автора
+- author_votes integer — Голоса за карму автора
+- summary text — Краткое содержание, 1–5 предложений (LLM)
+- meaning text — Главный смысл статьи, 1–10 предложений (LLM)
+- audience_level text — Уровень читателя, на которого рассчитана статья: beginner, intermediate, advanced
+- audience_description text — Кому адресована статья (LLM)
+- primary_genre text — Основной жанр: technical, opinion, news, marketing, academic, biographical, fiction, other
+- secondary_genres text[] — Дополнительные жанры, по-английски (LLM)
+- topic_names text[] — Темы статьи: названия (LLM)
+- topic_descriptions text[] — Темы статьи: описания, в порядке topic_names
+- themes text[] — Идейные мотивы статьи (LLM)
+- key_insights text[] — Ключевые выводы статьи (LLM)
+- keywords text[] — Ключевые слова, в нижнем регистре (LLM)
+- keyword_notes text[] — Пояснения ключевых слов, в порядке keywords
+- nsfw boolean — Статья небезопасна для просмотра на работе (NSFW), по оценке LLM
+- nsfw_reasons text[] — Почему статья NSFW
+- polarity text — Тональность: positive, negative, neutral, mixed
+- sentiment_confidence double precision — Уверенность в тональности, от 0 до 1
+- tone text — Тон статьи словами
+- sentiment_explanation text — Пояснение тональности
+- completeness_score double precision — Полнота изложения, от 0 до 1
+- completeness_level text — Полнота изложения: comprehensive, moderate, superficial
+- missing_elements text[] — Чего не хватает статье
+- contradictory_statements text[] — Утверждения статьи, которые противоречат друг другу
+- demagoguery_techniques text[] — Демагогические приёмы, найденные в тексте
+- demagoguery_severity text — Степень демагогии: none, low, medium
+- demagoguery_explanation text — Пояснение оценки демагогии
+- advertising boolean — В статье есть реклама
+- advertising_items text[] — Что рекламирует статья
+- advertising_confidence double precision — Уверенность в том, что реклама есть, от 0 до 1
+- advertising_explanation text — Пояснение оценки рекламы
+
+### text_embeddings
+Тексты статей, по которым ищут по смыслу, и их векторы: 147 432 строки, по строке на текст. Каждый текст — значение поля статьи из indexed_text (краткое содержание, смысл, вывод, мотив, тема, аудитория, противоречие, причина NSFW). В строке повторены поля статьи для фильтров поиска, их значения — те же, что в indexed_text
+- task_id bigint — Статья: indexed_text.task_id
+- embedding_name text — Из какого поля статьи текст: summary (summary), meaning (meaning), insight (key_insights), theme (themes), topic (topic_names и topic_descriptions), audience (audience_description), contradictory (contradictory_statements), nsfwReason (nsfw_reasons)
+- index integer — Номер элемента в массиве поля, с 0: index = 2 у insight — key_insights[3]; у summary, meaning и audience всегда 0
+- text text — Текст, по которому посчитан вектор: значение поля; у topic — название темы и через пробел её описание
+- embedding_vector vector(768) — Вектор текста: EmbeddingGemma 300M (Q4_0), 768 чисел, длина 1. Близость текстов — косинусное расстояние embedding_vector <=> вектор, от 0 (то же) до 2
+- habr_id integer — Номер статьи на Хабре: indexed_text.habr_id
+- title text — Заголовок статьи на Хабре: indexed_text.title
+- published date — Дата публикации статьи: indexed_text.published
+- post_type text — Тип публикации: indexed_text.post_type
+- primary_genre text — Основной жанр статьи: indexed_text.primary_genre
+- polarity text — Тональность статьи: indexed_text.polarity
+- audience_level text — Уровень читателя: indexed_text.audience_level
+- demagoguery_severity text — Степень демагогии: indexed_text.demagoguery_severity
+- nsfw boolean — NSFW: indexed_text.nsfw
+- advertising boolean — Есть реклама: indexed_text.advertising
+- score integer — Рейтинг статьи: indexed_text.score
+- hubs text[] — Хабы статьи: indexed_text.hubs

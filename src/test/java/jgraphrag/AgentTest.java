@@ -136,6 +136,17 @@ class AgentTest {
     }
 
     @Test
+    void anEmptyAnswerOfTheProviderIsTriedAgainAsA5xxIs() {
+        RuntimeException empty = new RuntimeException(com.fasterxml.jackson.databind.exc.MismatchedInputException.from(
+                null, (Class<?>) null, "No content to map due to end-of-input\n at [Source: REDACTED; line: 1]"));
+        assertTrue(Agent.passing(empty));
+        assertTrue(Agent.passing(new dev.langchain4j.exception.RetriableException("429")));
+        assertFalse(Agent.passing(new IllegalStateException("boom")));
+        assertFalse(Agent.passing(new RuntimeException(com.fasterxml.jackson.databind.exc.MismatchedInputException.from(
+                null, (Class<?>) null, "Cannot deserialize value of type `int`"))));
+    }
+
+    @Test
     void tokensCostAndProvidersAddUp() {
         Agent.Outcome o = toolThenSubmit().outcome();
         assertEquals(300, o.inputTokens());

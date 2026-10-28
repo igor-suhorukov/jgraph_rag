@@ -8,7 +8,7 @@
     <artifactId>jgraph-rag</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <name>jgraph_rag</name>
-    <description>An agent's memory over MCP: the same knowledge through SQL tables and through SPARQL over their R2RML mapping</description>
+    <description>An agent's memory over MCP: the same knowledge through SQL tables and through SPARQL over their R2RML mapping, and a corpus of articles through vector search</description>
 
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
@@ -17,8 +17,12 @@
         <langchain4j-mcp.version>1.22.0-beta32</langchain4j-mcp.version>
         <mcp.version>2.1.0</mcp.version>
         <testcontainers.version>2.0.5</testcontainers.version>
-        <!-- the commit of github.com/igor-suhorukov/pg_knowledge_base the integration tests build -->
+        <!-- the commits the database image of the integration tests and of scripts/db.sh is built at:
+             github.com/igor-suhorukov/pg_knowledge_base, github.com/igor-suhorukov/pg_lance_tam and the checkout of
+             github.com/lance-format/lance its engine links -->
         <kb.commit>30b20cc0e2a6aebdd03125954134471b29a79e68</kb.commit>
+        <lance_tam.commit>f4026d4ded34088c562fcb16142a77026e719fcf</lance_tam.commit>
+        <lance.commit>dc53d5d174af62c49ddd98d1024a64488c1e4404</lance.commit>
     </properties>
 
     <dependencyManagement>
@@ -62,6 +66,12 @@
             <artifactId>postgresql</artifactId>
             <version>42.7.14</version>
         </dependency>
+        <!-- the corpus: its parquet files read straight from GitHub Pages -->
+        <dependency>
+            <groupId>org.duckdb</groupId>
+            <artifactId>duckdb_jdbc</artifactId>
+            <version>2.0.0.0</version>
+        </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-yaml</artifactId>
@@ -79,7 +89,7 @@
             <version>6.1.3</version>
             <scope>test</scope>
         </dependency>
-        <!-- integration tests: PostgreSQL 19 with pg_knowledge_base built from its repository -->
+        <!-- integration tests: PostgreSQL 19 with pg_knowledge_base, pgvector and lance_tam built from their repositories -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-postgresql</artifactId>
@@ -109,6 +119,8 @@
                 <configuration>
                     <systemPropertyVariables>
                         <kb.commit>${kb.commit}</kb.commit>
+                        <lance_tam.commit>${lance_tam.commit}</lance_tam.commit>
+                        <lance.commit>${lance.commit}</lance.commit>
                     </systemPropertyVariables>
                 </configuration>
                 <executions>

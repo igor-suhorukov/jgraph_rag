@@ -3,6 +3,7 @@ package jgraphrag;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -293,8 +294,7 @@ final class Agent {
             try {
                 return model.chat(request);
             } catch (RuntimeException e) {
-                boolean passing = e instanceof RetriableException || e instanceof UnresolvedModelServerException;
-                if (!passing || attempt >= BACKOFF_SECONDS.length) {
+                if (!passing(e) || attempt >= BACKOFF_SECONDS.length) {
                     throw e;
                 }
                 long wait = BACKOFF_SECONDS[attempt] * 1000L + JITTER.nextLong(1000);
@@ -309,6 +309,19 @@ final class Agent {
                 }
             }
         }
+    }
+
+    static boolean passing(RuntimeException e) {
+        if (e instanceof RetriableException || e instanceof UnresolvedModelServerException) {
+            return true;
+        }
+        for (Throwable c = e; c != null; c = c.getCause() == c ? null : c.getCause()) {
+            if (c instanceof MismatchedInputException m && m.getMessage() != null
+                    && m.getMessage().startsWith("No content to map due to end-of-input")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static String describe(Throwable e) {

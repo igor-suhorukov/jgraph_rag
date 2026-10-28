@@ -8,7 +8,9 @@ import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema;
+import org.postgresql.util.PGobject;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -18,6 +20,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +33,9 @@ public final class MemoryServer {
     static final String BASE = "https://example.org/story-kg/id/habr-1097022/";
     static final int MAX_ROWS = 200;
     static final int MAX_CHARS = 20_000;
+    static final String SQL_QUERY = "sql_query";
+    static final int MAX_K = 50;
+    static final int DEFAULT_K = 10;
 
     static final Map<String, String> PREFIXES = new LinkedHashMap<>();
 
@@ -58,34 +64,48 @@ public final class MemoryServer {
 
     private final String jdbcUrl;
     private final Lang lang;
+    private final Embedder embedder;
     private final ObjectMapper json = new ObjectMapper();
-    private Connection sql;
-    private Connection sparql;
+    private final Map<String, Connection> connections = new HashMap<>();
 
-    MemoryServer(String jdbcUrl, Lang lang) {
+    MemoryServer(String jdbcUrl, Lang lang, Embedder embedder) {
         this.jdbcUrl = jdbcUrl;
         this.lang = lang;
+        this.embedder = embedder;
     }
 
     public static void main(String[] args) throws Exception {
         List<String> tools = Arrays.asList((args.length > 0 ? args[0] : "sql,sparql").split(","));
         Lang lang = Lang.of(args.length > 1 ? args[1] : "ru");
         String jdbc = System.getenv().getOrDefault("JGRAPH_JDBC", "jdbc:postgresql://127.0.0.1:5432/" + lang.database());
-        MemoryServer memory = new MemoryServer(jdbc, lang);
+        MemoryServer memory = new MemoryServer(jdbc, lang,
+                new Embedder(System.getenv().getOrDefault("JGRAPH_OLLAMA", "http://127.0.0.1:11434")));
         JacksonMcpJsonMapper mapper = new JacksonMcpJsonMapper(new ObjectMapper());
         String input = """
                 {"type": "object",
                  "properties": {"query": {"type": "string", "description": "%s"}},
                  "required": ["query"]}""".formatted(lang.queryArgument());
+        String search = """
+                {"type": "object",
+                 "properties": {"query": {"type": "string", "description": "%s"},
+                                "where": {"type": "string", "description": "%s"},
+                                "k": {"type": "integer", "minimum": 1, "maximum": %d, "description": "%s"}},
+                 "required": ["query"]}""".formatted(lang.searchQuery(), lang.searchWhere().replace("\"", "\\\""), MAX_K,
+                lang.searchK(DEFAULT_K, MAX_K));
         var spec = McpServer.sync(new StdioServerTransportProvider(mapper))
                 .serverInfo("jgraph-rag-memory", "0.1.0")
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(false).build());
         for (String tool : tools) {
             switch (tool) {
-                case "sql" -> spec.toolCall(McpSchema.Tool.builder("sql_query", mapper, input).description(lang.sqlDescription()).build(),
+                case "sql" -> spec.toolCall(McpSchema.Tool.builder(SQL_QUERY, mapper, input).description(lang.sqlDescription()).build(),
                         (exchange, request) -> memory.call(request, true));
                 case "sparql" -> spec.toolCall(McpSchema.Tool.builder("sparql_query", mapper, input).description(lang.sparqlDescription()).build(),
                         (exchange, request) -> memory.call(request, false));
+                case "corpus" -> spec.toolCall(McpSchema.Tool.builder(SQL_QUERY, mapper, input).description(lang.corpusSqlDescription()).build(),
+                        (exchange, request) -> memory.call(request, true));
+                case "semantic" -> spec.toolCall(McpSchema.Tool.builder("semantic_search", mapper, search)
+                                .description(lang.semanticDescription()).build(),
+                        (exchange, request) -> memory.search(request));
                 default -> throw new IllegalArgumentException("tool " + tool);
             }
         }
@@ -113,27 +133,53 @@ public final class MemoryServer {
         }
     }
 
+    synchronized McpSchema.CallToolResult search(McpSchema.CallToolRequest request) {
+        Map<String, Object> args = request.arguments() == null ? Map.of() : request.arguments();
+        if (!(args.get("query") instanceof String query) || query.isBlank()) {
+            return error(lang.noQuery());
+        }
+        Object where = args.get("where");
+        if (where != null && !(where instanceof String)) {
+            return error(lang.badWhere());
+        }
+        Object k = args.getOrDefault("k", DEFAULT_K);
+        if (!(k instanceof Number n) || n.doubleValue() != Math.rint(n.doubleValue()) || n.intValue() < 1 || n.intValue() > MAX_K) {
+            return error(lang.badK(MAX_K));
+        }
+        try {
+            return McpSchema.CallToolResult.builder().addTextContent(runSearch(query, (String) where, n.intValue()))
+                    .isError(false).build();
+        } catch (SQLException e) {
+            return error(e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return error(e.getClass().getSimpleName() + ": " + e.getMessage());
+        } catch (Exception e) {
+            return error(e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
     McpSchema.CallToolResult error(String message) {
         return McpSchema.CallToolResult.builder().addTextContent(lang.error() + message).isError(true).build();
     }
 
-    private Connection connection(boolean isSql) throws SQLException {
-        Connection c = isSql ? sql : sparql;
+    private Connection connection(String role, String tool) throws SQLException {
+        Connection c = connections.get(role);
         if (c == null || c.isClosed() || !c.isValid(2)) {
-            c = open(isSql);
-            if (isSql) {
-                sql = c;
-            } else {
-                sparql = c;
-            }
+            c = open(role, tool);
+            connections.put(role, c);
         }
         return c;
     }
 
-    private Connection open(boolean isSql) throws SQLException {
+    private Connection connection(boolean isSql) throws SQLException {
+        return isSql ? connection("agent_sql", SQL_QUERY) : connection("agent_sparql", "sparql_query");
+    }
+
+    private Connection open(String role, String tool) throws SQLException {
         Properties p = new Properties();
-        p.setProperty("user", isSql ? "agent_sql" : "agent_sparql");
-        p.setProperty("ApplicationName", isSql ? "jgraph-rag sql_query" : "jgraph-rag sparql_query");
+        p.setProperty("user", role);
+        p.setProperty("ApplicationName", "jgraph-rag " + tool);
         Connection c = DriverManager.getConnection(jdbcUrl, p);
         try {
             c.setReadOnly(true);
@@ -151,23 +197,45 @@ public final class MemoryServer {
                 return lang.noRows();
             }
             try (ResultSet rs = st.getResultSet()) {
-                ResultSetMetaData md = rs.getMetaData();
-                List<String> header = new ArrayList<>();
-                for (int i = 1; i <= md.getColumnCount(); i++) {
-                    header.add(md.getColumnLabel(i));
-                }
-                List<List<String>> rows = new ArrayList<>();
-                while (rs.next()) {
-                    List<String> row = new ArrayList<>();
-                    for (int i = 1; i <= header.size(); i++) {
-                        String v = rs.getString(i);
-                        row.add(v == null ? "NULL" : v);
-                    }
-                    rows.add(row);
-                }
-                return table(header, rows, lang);
+                return table(rs);
             }
         }
+    }
+
+    @SuppressWarnings("java:S2077")
+    String runSearch(String query, String where, int k) throws SQLException, IOException, InterruptedException {
+        PGobject q = new PGobject();
+        q.setType("vector");
+        q.setValue(Embedder.literal(embedder.embed(query)));
+        String sql = "SELECT task_id, habr_id, title, embedding_name, index, text,"
+                + " round((embedding_vector <=> ?)::numeric, 4) AS distance FROM text_embeddings"
+                + (where == null || where.isBlank() ? "" : " WHERE (" + where + ")")
+                + " ORDER BY embedding_vector <=> ? LIMIT " + k;
+        try (PreparedStatement ps = connection("agent_vector", "semantic_search").prepareStatement(sql)) {
+            ps.setObject(1, q);
+            ps.setObject(2, q);
+            try (ResultSet rs = ps.executeQuery()) {
+                return table(rs);
+            }
+        }
+    }
+
+    private String table(ResultSet rs) throws SQLException {
+        ResultSetMetaData md = rs.getMetaData();
+        List<String> header = new ArrayList<>();
+        for (int i = 1; i <= md.getColumnCount(); i++) {
+            header.add(md.getColumnLabel(i));
+        }
+        List<List<String>> rows = new ArrayList<>();
+        while (rs.next() && rows.size() <= MAX_ROWS) {
+            List<String> row = new ArrayList<>();
+            for (int i = 1; i <= header.size(); i++) {
+                String v = rs.getString(i);
+                row.add(v == null ? "NULL" : v);
+            }
+            rows.add(row);
+        }
+        return table(header, rows, lang);
     }
 
     String runSparql(String query) throws SQLException, JsonProcessingException {

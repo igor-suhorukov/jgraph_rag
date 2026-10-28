@@ -29,6 +29,18 @@ class ScorerTest {
     }
 
     @Test
+    void anArticleCountsByItsNumberOrItsAddress() {
+        for (String id : List.of("707474", "https://habr.com/ru/articles/707474/", "habr.com/ru/articles/707474")) {
+            assertEquals("707474", Scorer.norm(id), id);
+        }
+        Map<String, Object> gold = Map.of("kind", "set", "ids", List.of(707474),
+                "labels", List.of("«Мутные» перспективы производителя ламп Thomson на примере лампочки 24Вт с цоколем е27"));
+        assertTrue(SCORER.score(gold, values("https://habr.com/ru/articles/707474/", "")).correct());
+        assertTrue(SCORER.score(gold, values("x", "«Мутные» перспективы производителя ламп Thomson на примере лампочки 24Вт с цоколем Е27")).correct());
+        assertFalse(SCORER.score(gold, values("707474", "", "714704", "")).correct());
+    }
+
+    @Test
     void aSetMustBeExactAndMayNameNodesByLabel() {
         Map<String, Object> gold = Map.of("kind", "set", "ids", List.of("postgresql", "mongodb"),
                 "labels", List.of("PostgreSQL", "MongoDB"));
