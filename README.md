@@ -25,7 +25,7 @@ the corpus's parquet files through its JDBC driver straight from GitHub Pages. T
 | `db/agent_roles.sql` | the read-only roles the memory server connects as: `agent_sql` reaches the tables only, `agent_sparql` runs `kb.sparql_json` |
 | `db/describe.sql` | writes what the agent is told about its memory (`src/main/resources/prompts/{lang}/memory.md` and the inventories) from the catalog |
 | `db/corpus.sql` | the corpus's tables, `USING lance`: `corpus.indexed_text` (an article a row, the nested fields as columns) and `corpus.text_embeddings` (a text a row: its vector, its text and the article's fields a search filters by), a comment on every column |
-| `db/corpus_indexes.sql`, `db/corpus_roles.sql` | Lance's indexes of the corpus (IVF_HNSW_SQ for the vectors, BTREE and BITMAP for the filters) and the roles in the corpus's database `habr`: `agent_sql` reads its tables, `agent_vector`, which `semantic_search` runs as, `text_embeddings` alone |
+| `db/corpus_indexes.sql`, `db/corpus_roles.sql` | Lance's indexes of the corpus (IVF_HNSW_SQ for the vectors, BTREE, BITMAP and LABEL_LIST for the filters) and the roles in the corpus's database `habr`: `agent_sql` reads its tables, `agent_vector`, which `semantic_search` runs as, `text_embeddings` alone |
 | `db/describe_corpus.sql` | writes `src/main/resources/prompts/ru/corpus.md`, what the agent is told about the corpus, from the catalog |
 | `results/` | the runs as JSONL with their traces: the article's knowledge base (`main.{ru,en}`, the control, the pilots) and the corpus (`corpus.ru`, and `corpus-1.ru`, the first run, when `semantic_search` ran as `agent_sql`); `vector-stores.md`, the report of `VectorStoresIT` the article quotes |
 | `questions/corpus.ru.yaml` | 12 questions about the corpus: articles found by meaning, with filters and without, counts, fields of an article found by meaning, two with no answer; each with its gold answer, a gold SQL query and a gold search |
@@ -88,10 +88,12 @@ cosine distance: `ORDER BY embedding_vector <=> $1 LIMIT k` over `corpus.text_em
 SQL condition over the table's columns, as `agent_vector`, which reads that table alone: in the first run of the corpus
 (`results/corpus-1.ru.jsonl`), as `agent_sql`, DeepSeek read the counters of `indexed_text` through `where` under
 `vector`, by a subquery and by the text of a cast's error. On the lance table Lance applies a condition on text, integer,
-boolean and date columns before the search; one on the array `hubs` PostgreSQL applies after it. The agent's searches
-probe all 16 partitions of the IVF_HNSW_SQ index and re-rank ten times `k` candidates by their full vectors
-(`lance.nprobes`, `lance.refine_factor` of the roles in `habr`): in `VectorStoresIT` they found all the exact ten
-nearest under every filter Lance applies, in 2 to 6 ms.
+boolean and date columns before the search, and one on the array `hubs` by `@>`, `&&` or `= ANY`
+(`hubs @> ARRAY['PostgreSQL']`), which its LABEL_LIST index answers; another condition on `hubs` PostgreSQL applies
+after it. The agent's searches probe all 16 partitions of the IVF_HNSW_SQ index and re-rank ten times `k` candidates
+by their full vectors (`lance.nprobes`, `lance.refine_factor` of the roles in `habr`): in `VectorStoresIT` they found
+all the exact ten nearest under every filter Lance applied, in 2 to 6 ms (`results/vector-stores.md`, lance_tam
+f4026d4, before Lance applied the one on `hubs`).
 
 ## Build and test
 

@@ -76,7 +76,7 @@ class VectorStoresIT {
             new Filter("nsfw", "nsfw", true),
             new Filter("news, negative", "post_type = 'news' AND polarity = 'negative'", true),
             new Filter("primary_genre = 'fiction'", "primary_genre = 'fiction'", true),
-            new Filter("hub PostgreSQL (an array)", "hubs @> ARRAY['PostgreSQL']", false));
+            new Filter("hub PostgreSQL (an array)", "hubs @> ARRAY['PostgreSQL']", true));
 
     private static Connection pg;
     private static List<PGobject> queries;
@@ -118,6 +118,8 @@ class VectorStoresIT {
                     + " ON lance_store.text_embeddings USING lance_index (" + column + ") WITH (type = '" + type + "')");
         }
         build("pgvector (heap)", "gin (hubs)", "CREATE INDEX heap_hubs ON heap_store.text_embeddings USING gin (hubs)");
+        build("Lance", "label_list (hubs)", "CREATE INDEX lance_hubs ON lance_store.text_embeddings USING lance_index (hubs)"
+                + " WITH (type = 'label_list')");
         sizes();
 
         Embedder embedder = new Embedder(KbDatabase.ollama());

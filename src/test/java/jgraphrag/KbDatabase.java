@@ -23,7 +23,7 @@ import java.util.Properties;
 final class KbDatabase {
 
     static final String COMMIT = System.getProperty("kb.commit", "30b20cc0e2a6aebdd03125954134471b29a79e68");
-    static final String LANCE_TAM_COMMIT = System.getProperty("lance_tam.commit", "f4026d4ded34088c562fcb16142a77026e719fcf");
+    static final String LANCE_TAM_COMMIT = System.getProperty("lance_tam.commit", "4b3a776b30855f13a597cdfb6c1a212060c5055c");
     static final String LANCE_COMMIT = System.getProperty("lance.commit", "dc53d5d174af62c49ddd98d1024a64488c1e4404");
     static final String CORPUS = "habr";
 
